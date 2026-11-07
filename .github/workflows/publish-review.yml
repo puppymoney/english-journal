@@ -1,0 +1,54 @@
+name: Publish a review from an Issue
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-review
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.label.name == 'publish-review' &&
+      github.event.issue.author_association == 'OWNER' &&
+      github.event.issue.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      revision: ${{ steps.commit.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Import owner-authored Markdown
+        run: npm run import:issue
+      - run: npm run validate
+      - name: Commit review
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/daily/
+          git commit -m 'Publish daily English review'
+          git push origin HEAD:main
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  deploy:
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      revision: ${{ needs.publish.outputs.revision }}
